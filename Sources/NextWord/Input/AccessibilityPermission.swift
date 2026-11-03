@@ -1,0 +1,19 @@
+import AppKit
+import ApplicationServices
+
+@MainActor
+enum AccessibilityPermission {
+    static var isTrusted: Bool {
+        AXIsProcessTrusted()
+    }
+
+    static func request() {
+        let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
+        _ = AXIsProcessTrustedWithOptions(options)
+    }
+
+    static func openSystemSettings() {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") else { return }
+        NSWorkspace.shared.open(url)
+    }
+}
