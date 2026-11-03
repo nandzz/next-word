@@ -4,6 +4,8 @@
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
+	<key>CFBundleDisplayName</key>
+	<string>NextWord</string>
 	<key>CFBundleExecutable</key>
 	<string>NextWord</string>
 	<key>CFBundleIconFile</key>
@@ -13,8 +15,6 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>NextWord</string>
-	<key>CFBundleDisplayName</key>
 	<string>NextWord</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
@@ -31,6 +31,6 @@
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSHumanReadableCopyright</key>
-	<string>NextWord</string>
+	<string>Copyright © 2026 Felipe Fernandes. MIT License.</string>
 </dict>
 </plist>

@@ -80,3 +80,7 @@ xcrun swift test
 | `Sources/NextWord/Claude`, `Codex`, `OnDevice`, `Engines` | The engines |
 | `Sources/NextWord/UI` | Panel, menu bar popover, settings window |
 | `Tests/NextWordTests` | Unit tests |
+
+## License
+
+NextWord uses the MIT License. See [LICENSE](LICENSE).
