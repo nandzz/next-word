@@ -150,11 +150,11 @@ enum ClipboardContextReader {
         return declared.isEmpty ? kept : declared
     }
 
-    static func snapshot(of pasteboard: NSPasteboard) -> [[NSPasteboard.PasteboardType: Data]] {
+    static func snapshot(of pasteboard: NSPasteboard, maxTypeSize: Int = maxSnapshotTypeSize) -> [[NSPasteboard.PasteboardType: Data]] {
         (pasteboard.pasteboardItems ?? []).map { item in
             var entry: [NSPasteboard.PasteboardType: Data] = [:]
             for type in typesToSnapshot(item.types) {
-                guard let data = item.data(forType: type), data.count <= maxSnapshotTypeSize else { continue }
+                guard let data = item.data(forType: type), data.count <= maxTypeSize else { continue }
                 entry[type] = data
             }
             return entry

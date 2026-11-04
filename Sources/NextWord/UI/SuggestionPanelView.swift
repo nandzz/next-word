@@ -467,17 +467,7 @@ private struct SuggestionRow: View {
         }
         .padding(.horizontal, 8)
         .frame(height: 30)
-        .background {
-            if isSelected {
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(Color.accentColor.opacity(0.20))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .strokeBorder(Color.accentColor.opacity(0.35), lineWidth: 0.5)
-                    }
-                    .matchedGeometryEffect(id: "selection", in: selection)
-            }
-        }
+        .selectionBackground(isSelected, in: selection)
         .contentShape(Rectangle())
         .opacity(appeared ? 1 : 0)
         .offset(y: appeared ? 0 : 3)
@@ -524,6 +514,46 @@ private struct SuggestionRow: View {
     }
 }
 
+private struct LoadingHeader: View {
+    let engine: SuggestionEngine
+    let title: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: engine == .claude ? "sparkles" : engine.displaySymbol)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Color.accentColor)
+                .symbolEffect(.pulse)
+            Text(title)
+                .font(.system(size: 11.5, weight: .medium))
+                .foregroundStyle(.secondary)
+            Spacer()
+            ProgressView()
+                .controlSize(.small)
+                .scaleEffect(0.75)
+                .frame(width: 14, height: 14)
+        }
+        .padding(.horizontal, 8)
+        .padding(.top, 2)
+    }
+}
+
+private extension View {
+    func selectionBackground(_ isSelected: Bool, in namespace: Namespace.ID) -> some View {
+        background {
+            if isSelected {
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(Color.accentColor.opacity(0.20))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .strokeBorder(Color.accentColor.opacity(0.35), lineWidth: 0.5)
+                    }
+                    .matchedGeometryEffect(id: "selection", in: namespace)
+            }
+        }
+    }
+}
+
 private struct LoadingContent: View {
     let rowCount: Int
     let columns: Int
@@ -532,23 +562,8 @@ private struct LoadingContent: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 6) {
-                Image(systemName: engine == .claude ? "sparkles" : engine.displaySymbol)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Color.accentColor)
-                    .symbolEffect(.pulse)
-                Text(loadingTitle)
-                    .font(.system(size: 11.5, weight: .medium))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                ProgressView()
-                    .controlSize(.small)
-                    .scaleEffect(0.75)
-                    .frame(width: 14, height: 14)
-            }
-            .padding(.horizontal, 8)
-            .padding(.top, 2)
-            .padding(.bottom, 2)
+            LoadingHeader(engine: engine, title: loadingTitle)
+                .padding(.bottom, 2)
             placeholders
                 .shimmering()
         }
@@ -665,17 +680,7 @@ private struct RewriteRow: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 7)
-        .background {
-            if isSelected {
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(Color.accentColor.opacity(0.20))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 7, style: .continuous)
-                            .strokeBorder(Color.accentColor.opacity(0.35), lineWidth: 0.5)
-                    }
-                    .matchedGeometryEffect(id: "selection", in: selection)
-            }
-        }
+        .selectionBackground(isSelected, in: selection)
         .contentShape(Rectangle())
         .opacity(appeared ? 1 : 0)
         .offset(y: appeared ? 0 : 3)
@@ -695,23 +700,8 @@ private struct RewriteLoadingContent: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 6) {
-                Image(systemName: engine == .claude ? "sparkles" : engine.displaySymbol)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Color.accentColor)
-                    .symbolEffect(.pulse)
-                Text(loadingTitle)
-                    .font(.system(size: 11.5, weight: .medium))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                ProgressView()
-                    .controlSize(.small)
-                    .scaleEffect(0.75)
-                    .frame(width: 14, height: 14)
-            }
-            .padding(.horizontal, 8)
-            .padding(.top, 2)
-            .padding(.bottom, 4)
+            LoadingHeader(engine: engine, title: loadingTitle)
+                .padding(.bottom, 4)
             VStack(spacing: 1) {
                 ForEach(Self.widths.indices, id: \.self) { index in
                     placeholder(widths: Self.widths[index])

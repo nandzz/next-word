@@ -37,20 +37,21 @@ enum FocusedTextReader {
 
     private static let state = OSAllocatedUnfairLock(initialState: State())
 
-    nonisolated static func readContext(maxLength: Int, primaryScreenHeight: CGFloat) -> TextContext? {
+    private struct Focus {
+        var app: AXUIElement
+        var runningApp: NSRunningApplication?
+        var kind: AppKind
+        var focused: AXUIElement?
+    }
+
+    private static func focus() -> Focus? {
         let systemWide = AXUIElementCreateSystemWide()
         AXUIElementSetMessagingTimeout(systemWide, messagingTimeout)
-
-        guard let (appElement, pid) = focusedApplication(systemWide: systemWide) else {
-            DebugLog.write("ax: no focused application")
-            return nil
-        }
+        guard let (appElement, pid) = focusedApplication(systemWide: systemWide) else { return nil }
         AXUIElementSetMessagingTimeout(appElement, messagingTimeout)
 
         let runningApp = NSRunningApplication(processIdentifier: pid)
-        let appName = runningApp?.localizedName ?? "Unknown"
-        let bundleID = runningApp?.bundleIdentifier
-        let kind = appKind(pid: pid, bundleID: bundleID, bundleURL: runningApp?.bundleURL)
+        let kind = appKind(pid: pid, bundleID: runningApp?.bundleIdentifier, bundleURL: runningApp?.bundleURL)
         enableAccessibility(appElement, pid: pid, kind: kind, atTrigger: true)
 
         var focused: AXUIElement?
@@ -59,16 +60,30 @@ enum FocusedTextReader {
             focused = element(appElement, kAXFocusedUIElementAttribute) ?? element(systemWide, kAXFocusedUIElementAttribute)
             if focused != nil { break }
         }
-        guard let focused else {
-            DebugLog.write("ax: \(bundleID ?? appName) kind=\(kind) no focused element, error=\(lastError(appElement, kAXFocusedUIElementAttribute))")
+        if let focused { AXUIElementSetMessagingTimeout(focused, messagingTimeout) }
+        return Focus(app: appElement, runningApp: runningApp, kind: kind, focused: focused)
+    }
+
+    private static func isSecure(role: String?, subrole: String?) -> Bool {
+        role == secureRole || subrole == secureRole
+    }
+
+    nonisolated static func readContext(maxLength: Int, primaryScreenHeight: CGFloat) -> TextContext? {
+        guard let focus = focus() else {
+            DebugLog.write("ax: no focused application")
             return nil
         }
-        AXUIElementSetMessagingTimeout(focused, messagingTimeout)
+        let appName = focus.runningApp?.localizedName ?? "Unknown"
+        let bundleID = focus.runningApp?.bundleIdentifier
+        guard let focused = focus.focused else {
+            DebugLog.write("ax: \(bundleID ?? appName) kind=\(focus.kind) no focused element, error=\(lastError(focus.app, kAXFocusedUIElementAttribute))")
+            return nil
+        }
 
-        let windowTitle = element(appElement, kAXFocusedWindowAttribute).flatMap { string($0, kAXTitleAttribute) }
+        let windowTitle = element(focus.app, kAXFocusedWindowAttribute).flatMap { string($0, kAXTitleAttribute) }
         let role = string(focused, kAXRoleAttribute)
         let subrole = string(focused, kAXSubroleAttribute)
-        let isSecure = role == secureRole || subrole == secureRole
+        let isSecure = isSecure(role: role, subrole: subrole)
         let selection = range(focused, kAXSelectedTextRangeAttribute)
         let isTextElement = role.map(textRoles.contains) == true || selection != nil
 
@@ -96,23 +111,16 @@ enum FocusedTextReader {
     }
 
     nonisolated static func readField(maxLength: Int) -> FieldSnapshot? {
-        let systemWide = AXUIElementCreateSystemWide()
-        AXUIElementSetMessagingTimeout(systemWide, messagingTimeout)
-        guard let (appElement, pid) = focusedApplication(systemWide: systemWide) else { return nil }
-        AXUIElementSetMessagingTimeout(appElement, messagingTimeout)
-        guard let focused = element(appElement, kAXFocusedUIElementAttribute) ?? element(systemWide, kAXFocusedUIElementAttribute) else {
-            return nil
-        }
-        AXUIElementSetMessagingTimeout(focused, messagingTimeout)
-
-        let bundleID = NSRunningApplication(processIdentifier: pid)?.bundleIdentifier
+        guard let focus = focus(), let focused = focus.focused else { return nil }
+        let bundleID = focus.runningApp?.bundleIdentifier
         let role = string(focused, kAXRoleAttribute)
         let subrole = string(focused, kAXSubroleAttribute)
+        let isTextRole = role.map(textRoles.contains) == true
         let selection = range(focused, kAXSelectedTextRangeAttribute)
         var snapshot = FieldSnapshot(
             bundleID: bundleID,
-            isTextElement: role.map(textRoles.contains) == true || selection != nil,
-            isSecure: role == secureRole || subrole == secureRole,
+            isEditable: isTextRole || isSettable(focused, kAXSelectedTextAttribute) || isSettable(focused, kAXValueAttribute),
+            isSecure: isSecure(role: role, subrole: subrole),
             selectionLength: max(selection?.length ?? 0, 0)
         )
         guard !snapshot.isSecure else { return snapshot }
@@ -122,16 +130,35 @@ enum FocusedTextReader {
         }
         let count = integer(focused, kAXNumberOfCharactersAttribute)
         snapshot.fieldLength = count
-        if let count, count >= 0, count <= maxLength {
-            snapshot.fieldText = count == 0 ? "" : string(focused, for: CFRange(location: 0, length: count))
+        snapshot.fieldText = fieldText(of: focused, count: count, readsUnknownLength: isTextRole, maxLength: maxLength)
+        if count == nil, let text = snapshot.fieldText {
+            snapshot.fieldLength = (text as NSString).length
         }
-        if snapshot.fieldText == nil, (count ?? 0) <= maxLength, let value = string(focused, kAXValueAttribute),
-           (value as NSString).length <= maxLength {
-            snapshot.fieldText = value
-            snapshot.fieldLength = (value as NSString).length
-        }
-        DebugLog.write("ax field: \(bundleID ?? "?") role=\(role ?? "?") selection=\(snapshot.selectionLength) selected=\(snapshot.selectedText?.count ?? -1) field=\(snapshot.fieldText?.count ?? -1) length=\(snapshot.fieldLength ?? -1)")
+        DebugLog.write("ax field: \(bundleID ?? "?") role=\(role ?? "?") editable=\(snapshot.isEditable) selection=\(snapshot.selectionLength) selected=\(snapshot.selectedText?.count ?? -1) field=\(snapshot.fieldText?.count ?? -1) length=\(snapshot.fieldLength ?? -1)")
         return snapshot
+    }
+
+    nonisolated static func focusedFieldText(maxLength: Int) -> String? {
+        guard let focused = focus()?.focused else { return nil }
+        let isTextRole = string(focused, kAXRoleAttribute).map(textRoles.contains) == true
+        return fieldText(of: focused, count: integer(focused, kAXNumberOfCharactersAttribute), readsUnknownLength: isTextRole, maxLength: maxLength)
+    }
+
+    private static func fieldText(of focused: AXUIElement, count: Int?, readsUnknownLength: Bool, maxLength: Int) -> String? {
+        if let count {
+            guard count >= 0, count <= maxLength else { return nil }
+            if count == 0 { return "" }
+            if let text = string(focused, for: CFRange(location: 0, length: count)) { return text }
+        } else if !readsUnknownLength {
+            return nil
+        }
+        guard let value = string(focused, kAXValueAttribute), (value as NSString).length <= maxLength else { return nil }
+        return value
+    }
+
+    private static func isSettable(_ element: AXUIElement, _ attribute: String) -> Bool {
+        var settable: DarwinBoolean = false
+        return AXUIElementIsAttributeSettable(element, attribute as CFString, &settable) == .success && settable.boolValue
     }
 
     nonisolated static func prepare(_ app: NSRunningApplication) {

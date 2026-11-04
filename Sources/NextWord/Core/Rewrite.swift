@@ -38,7 +38,7 @@ struct RewriteTarget: Sendable, Equatable {
 
 struct FieldSnapshot: Sendable, Equatable {
     var bundleID: String?
-    var isTextElement: Bool
+    var isEditable: Bool
     var isSecure: Bool
     var selectionLength: Int
     var selectedText: String? = nil
@@ -69,15 +69,14 @@ enum RewritePlanner {
         let bundleID = field?.bundleID ?? bundleID
         let fieldBlocked = bundleID.map(blocksFieldRewrite) ?? false
         guard let field else {
-            if fieldBlocked { return .unavailable(selectFirstMessage) }
-            return canCopy ? .copy(.field) : .unavailable(unreadableMessage)
+            return canCopy ? .copy(.selection) : .unavailable(unreadableMessage)
         }
         if field.isSecure { return .unavailable(secureMessage) }
+        guard field.isEditable else { return .unavailable(noTextFieldMessage) }
         if field.selectionLength > 0 {
             if let selected = field.selectedText { return target(.selection, selected) }
             return canCopy ? .copy(.selection) : .unavailable(unreadableMessage)
         }
-        guard field.isTextElement else { return .unavailable(noTextFieldMessage) }
         if fieldBlocked { return .unavailable(selectFirstMessage) }
         if let text = field.fieldText { return target(.field, text) }
         if let length = field.fieldLength, length > maxLength { return .unavailable(fieldTooLongMessage) }

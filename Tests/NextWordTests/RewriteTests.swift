@@ -4,7 +4,7 @@ import Testing
 
 private func field(
     bundleID: String? = "com.apple.TextEdit",
-    isTextElement: Bool = true,
+    isEditable: Bool = true,
     isSecure: Bool = false,
     selectionLength: Int = 0,
     selectedText: String? = nil,
@@ -13,7 +13,7 @@ private func field(
 ) -> FieldSnapshot {
     FieldSnapshot(
         bundleID: bundleID,
-        isTextElement: isTextElement,
+        isEditable: isEditable,
         isSecure: isSecure,
         selectionLength: selectionLength,
         selectedText: selectedText,
@@ -60,8 +60,9 @@ struct RewritePlannerTests {
         #expect(RewritePlanner.plan(for: field(), bundleID: nil, canCopy: false) == .unavailable(RewritePlanner.unreadableMessage))
     }
 
-    @Test func missingFieldIsCopiedWhenAllowed() {
-        #expect(RewritePlanner.plan(for: nil, bundleID: "com.tinyspeck.slackmacgap", canCopy: true) == .copy(.field))
+    @Test func missingFieldCopiesOnlyTheSelection() {
+        #expect(RewritePlanner.plan(for: nil, bundleID: "com.tinyspeck.slackmacgap", canCopy: true) == .copy(.selection))
+        #expect(RewritePlanner.plan(for: nil, bundleID: "com.apple.mail", canCopy: true) == .copy(.selection))
         #expect(RewritePlanner.plan(for: nil, bundleID: nil, canCopy: false) == .unavailable(RewritePlanner.unreadableMessage))
     }
 
@@ -70,8 +71,13 @@ struct RewritePlannerTests {
         #expect(RewritePlanner.plan(for: snapshot, bundleID: nil, canCopy: true) == .unavailable(RewritePlanner.secureMessage))
     }
 
-    @Test func nonTextElementIsRefused() {
-        let snapshot = field(isTextElement: false, fieldText: "Window content")
+    @Test func nonEditableElementIsRefused() {
+        let snapshot = field(isEditable: false, fieldText: "Window content")
+        #expect(RewritePlanner.plan(for: snapshot, bundleID: nil, canCopy: true) == .unavailable(RewritePlanner.noTextFieldMessage))
+    }
+
+    @Test func readOnlySelectionIsRefused() {
+        let snapshot = field(isEditable: false, selectionLength: 9, selectedText: "Read only")
         #expect(RewritePlanner.plan(for: snapshot, bundleID: nil, canCopy: true) == .unavailable(RewritePlanner.noTextFieldMessage))
     }
 
@@ -79,7 +85,6 @@ struct RewritePlannerTests {
     func fieldBlockedAppsNeedASelection(bundleID: String) {
         let snapshot = field(bundleID: bundleID, fieldText: "Some text")
         #expect(RewritePlanner.plan(for: snapshot, bundleID: nil, canCopy: true) == .unavailable(RewritePlanner.selectFirstMessage))
-        #expect(RewritePlanner.plan(for: nil, bundleID: bundleID, canCopy: true) == .unavailable(RewritePlanner.selectFirstMessage))
     }
 
     @Test func fieldBlockedAppsAllowASelection() {
@@ -232,6 +237,30 @@ struct RewritePromptTests {
         let instructions = OnDevicePrompt.rewriteInstructions(for: Fixtures.request(), language: "Italian")
         #expect(instructions.contains("in Italian"))
         #expect(instructions.contains("Never translate."))
+    }
+}
+
+struct TextReplacerPasteCheckTests {
+    @Test func fieldPasteIsConfirmedWhenFieldEqualsRewrite() {
+        #expect(TextReplacer.isPasted("Hi.", scope: .field, before: "hey hi", current: " Hi.\n"))
+    }
+
+    @Test func fieldPasteIsNotConfirmedBeforeChange() {
+        #expect(!TextReplacer.isPasted("Hi.", scope: .field, before: "hey hi", current: "hey hi"))
+    }
+
+    @Test func selectionPasteNeedsANewOccurrence() {
+        #expect(!TextReplacer.isPasted("send it", scope: .selection, before: "Please send it now", current: "Please send it now"))
+        #expect(TextReplacer.isPasted("send it", scope: .selection, before: "Please send it now", current: "Please send it send it now"))
+    }
+
+    @Test func selectionPasteWithUnknownBefore() {
+        #expect(TextReplacer.isPasted("Done.", scope: .selection, before: nil, current: "All Done."))
+    }
+
+    @Test(arguments: [("aXa", "a", 2), ("", "a", 0), ("abc", "", 0), ("aaa", "aa", 1)])
+    func countsOccurrences(text: String, needle: String, expected: Int) {
+        #expect(TextReplacer.occurrences(of: needle, in: text) == expected)
     }
 }
 

@@ -6,7 +6,7 @@ enum KeyboardLayout {
     static let ansiC: CGKeyCode = 8
     static let ansiV: CGKeyCode = 9
 
-    // Shortcuts match the character of the current layout, so a fixed ANSI code for ⌘A sends ⌘Q on AZERTY.
+    // Shortcuts match the character of the current layout with ⌘ held, so a fixed ANSI code for ⌘A sends ⌘Q on AZERTY.
     @MainActor
     static func keyCode(for character: Character, fallback: CGKeyCode) -> CGKeyCode {
         guard let source = TISCopyCurrentKeyboardLayoutInputSource()?.takeRetainedValue(),
@@ -23,7 +23,7 @@ enum KeyboardLayout {
                 layout,
                 UInt16(code),
                 UInt16(kUCKeyActionDown),
-                0,
+                UInt32((cmdKey >> 8) & 0xFF),
                 UInt32(LMGetKbdType()),
                 OptionBits(kUCKeyTranslateNoDeadKeysBit),
                 &deadKeyState,

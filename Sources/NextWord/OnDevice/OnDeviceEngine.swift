@@ -71,12 +71,7 @@ enum OnDeviceEngine {
         let keys = meaningKeys
 
         let fields: [String: String] = try await perform(timeout: request.timeout) {
-            let content = try await session.respond(to: prompt, schema: schema, includeSchemaInPrompt: true, options: options).content
-            var fields: [String: String] = [:]
-            for key in keys {
-                if let value = try? content.value(String.self, forProperty: key) { fields[key] = value }
-            }
-            return fields
+            stringFields(of: try await session.respond(to: prompt, schema: schema, includeSchemaInPrompt: true, options: options).content, keys: keys)
         }
         guard var meaning = EngineResponse.makeMeaning(from: fields, word: word, request: request) else {
             throw OnDeviceError.failed("The model returned an empty definition.")
@@ -97,21 +92,28 @@ enum OnDeviceEngine {
         let keys = RewriteStyle.allCases.map(\.rawValue)
 
         let fields: [String: String] = try await perform(timeout: request.timeout) {
-            let content = try await session.respond(to: prompt, schema: schema, includeSchemaInPrompt: true, options: options).content
-            var fields: [String: String] = [:]
-            for key in keys {
-                if let value = try? content.value(String.self, forProperty: key) { fields[key] = value }
-            }
-            return fields
+            stringFields(of: try await session.respond(to: prompt, schema: schema, includeSchemaInPrompt: true, options: options).content, keys: keys)
         }
         guard EngineResponse.hasRewriteFields(fields) else { throw OnDeviceError.failed("The model returned no rewrite.") }
         return EngineResponse.makeRewrites(from: fields, original: target.text)
     }
 
+    private static func stringFields(of content: GeneratedContent, keys: [String]) -> [String: String] {
+        var fields: [String: String] = [:]
+        for key in keys {
+            if let value = try? content.value(String.self, forProperty: key) { fields[key] = value }
+        }
+        return fields
+    }
+
+    private static func stringProperty(_ name: String, _ description: String) -> DynamicGenerationSchema.Property {
+        DynamicGenerationSchema.Property(name: name, description: description, schema: DynamicGenerationSchema(type: String.self))
+    }
+
     private static func rewriteSchema(language: String?, tone: Tone) throws -> GenerationSchema {
         let text = language ?? "the language of the message"
         func property(_ style: RewriteStyle, _ description: String) -> DynamicGenerationSchema.Property {
-            DynamicGenerationSchema.Property(name: style.rawValue, description: description, schema: DynamicGenerationSchema(type: String.self))
+            stringProperty(style.rawValue, description)
         }
         let properties = [
             property(.clearer, "The message in \(text) with correct grammar, spelling and punctuation, clear and natural, about the same length"),
@@ -135,9 +137,7 @@ enum OnDeviceEngine {
 
     private static func meaningSchema(language: String?, nativeLanguage: String, includeExample: Bool) throws -> GenerationSchema {
         let text = language ?? "the language of the sentence"
-        func property(_ name: String, _ description: String) -> DynamicGenerationSchema.Property {
-            DynamicGenerationSchema.Property(name: name, description: description, schema: DynamicGenerationSchema(type: String.self))
-        }
+        let property = stringProperty
         var properties = [
             property("partOfSpeech", "Part of speech, in \(text)"),
             property("definition", "Dictionary definition of the word in \(text), at most 15 words. Do not repeat the sentence."),
