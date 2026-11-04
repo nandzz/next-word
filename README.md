@@ -15,6 +15,20 @@ Hold **⇧ ?** in a text field. A panel opens near the cursor and shows 5, 10 or
 - **Rewrite**: push **⌘E** in the panel to get 3 versions of your text: clearer, shorter and reworded. Select one, and NextWord replaces the text. If text is selected, NextWord rewrites only the selection. If not, it rewrites the full text field. Push **⌘Z** in the app to undo.
 - Settings for the number of words, the engine, the tone, the language, the long-press duration and the meaning view.
 
+## Install
+
+With Homebrew:
+
+```bash
+brew tap nandzz/tap
+brew trust --cask nandzz/tap/nextword
+brew install --cask nandzz/tap/nextword
+```
+
+Or download `NextWord-<version>.zip` from [Releases](https://github.com/nandzz/next-word/releases), open it, and move `NextWord.app` to the Applications folder.
+
+The app is signed with a Developer ID certificate and notarized by Apple. When you open it for the first time, give it Accessibility access (see [Permissions](#permissions)).
+
 ## Requirements
 
 - macOS 14 or later. The on-device engine needs macOS 26, a Mac with Apple silicon and Apple Intelligence turned on.
