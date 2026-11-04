@@ -19,6 +19,8 @@ struct SuggestionPanelView: View {
     var onSizeChange: (CGSize) -> Void = { _ in }
     var onOpenMeaning: (() -> Void)?
     var onMeaningBack: (() -> Void)?
+    var onToggleRewrite: () -> Void = {}
+    var onSelectRewrite: (Int) -> Void = { _ in }
 
     static let maxShortcutRows = 10
 
@@ -31,7 +33,13 @@ struct SuggestionPanelView: View {
                     .padding(.bottom, 9)
                 Divider().opacity(0.6)
                 ZStack(alignment: .top) {
-                    if let meaning = session.meaning {
+                    if session.isRewriting {
+                        rewriteContent
+                            .transition(.asymmetric(
+                                insertion: .offset(x: 36).combined(with: .opacity),
+                                removal: .identity
+                            ))
+                    } else if let meaning = session.meaning {
                         meaningContent(meaning)
                             .transition(.asymmetric(
                                 insertion: .offset(x: 36).combined(with: .opacity),
@@ -47,15 +55,17 @@ struct SuggestionPanelView: View {
                 }
                 .padding(6)
                 .animation(.spring(response: 0.3, dampingFraction: 0.88), value: session.isShowingMeaning)
+                .animation(.spring(response: 0.3, dampingFraction: 0.88), value: session.isRewriting)
                 Divider().opacity(0.6)
                 PanelFooter(
                     mode: footerMode,
-                    latency: isLoaded && !session.isShowingMeaning ? status.lastLatency : nil,
+                    latency: showsLatency ? status.lastLatency : nil,
                     onRefresh: onRefresh,
                     onClose: onClose,
-                    onBack: goBack,
+                    onBack: session.isRewriting ? onToggleRewrite : goBack,
                     onNative: { session.meaningLanguage = .native },
-                    onInsert: insertMeaningWord
+                    onInsert: session.isRewriting ? { onSelectRewrite(session.rewriteIndex) } : insertMeaningWord,
+                    onRewrite: onToggleRewrite
                 )
             }
         }
@@ -107,6 +117,31 @@ struct SuggestionPanelView: View {
         }
     }
 
+    @ViewBuilder
+    private var rewriteContent: some View {
+        switch session.rewrite {
+        case .loading?, nil:
+            RewriteLoadingContent(engine: session.engine)
+        case let .loaded(rewrites)?:
+            RewriteList(
+                rewrites: rewrites,
+                scope: session.rewriteTarget?.scope ?? .field,
+                selectedIndex: session.rewriteIndex,
+                onHover: { session.rewriteIndex = $0 },
+                onSelect: onSelectRewrite
+            )
+            .id(rewrites.map(\.text).joined(separator: "\u{1F}"))
+        case let .failed(message)?:
+            MessageContent(
+                symbol: "exclamationmark.triangle.fill",
+                tint: .orange,
+                title: "Couldn’t rewrite",
+                message: message,
+                onRetry: onRefresh
+            )
+        }
+    }
+
     private func meaningContent(_ meaning: MeaningPhase) -> some View {
         MeaningCard(
             phase: meaning,
@@ -119,6 +154,9 @@ struct SuggestionPanelView: View {
     }
 
     private var footerMode: PanelFooter.Mode {
+        if session.isRewriting {
+            return .rewrite(canReplace: !session.rewrites.isEmpty)
+        }
         guard session.isShowingMeaning else {
             return .list(showsMeaning: settings.meaningEnabled && isLoaded && !session.words.isEmpty)
         }
@@ -152,6 +190,10 @@ struct SuggestionPanelView: View {
         if let word = meaningWord { onSelect(word) }
     }
 
+    private var showsLatency: Bool {
+        session.isRewriting ? !session.rewrites.isEmpty : isLoaded && !session.isShowingMeaning
+    }
+
     private var isLoaded: Bool {
         if case .loaded = session.phase { return true }
         return false
@@ -163,7 +205,10 @@ struct SuggestionPanelView: View {
 
     private var columns: Int { isGrid ? 2 : 1 }
 
-    private var panelWidth: CGFloat { isGrid ? 420 : 300 }
+    private var panelWidth: CGFloat {
+        if session.isRewriting { return 380 }
+        return isGrid ? 420 : 300
+    }
 
     private var engineDisplayName: String {
         switch session.engine {
@@ -556,6 +601,158 @@ private struct PlaceholderRow: View {
     }
 }
 
+private struct RewriteList: View {
+    let rewrites: [Rewrite]
+    let scope: RewriteScope
+    let selectedIndex: Int
+    let onHover: (Int) -> Void
+    let onSelect: (Int) -> Void
+    @Namespace private var selection
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(scope == .selection ? "Replaces the selected text" : "Replaces the whole message")
+                .font(.system(size: 10.5, weight: .medium))
+                .foregroundStyle(.tertiary)
+                .padding(.horizontal, 8)
+                .padding(.top, 2)
+                .padding(.bottom, 3)
+            ForEach(rewrites.indices, id: \.self) { index in
+                RewriteRow(
+                    index: index,
+                    rewrite: rewrites[index],
+                    isSelected: index == selectedIndex,
+                    selection: selection,
+                    appearDelay: Double(index) * 0.04
+                )
+                .onHover { if $0 { onHover(index) } }
+                .onTapGesture { onSelect(index) }
+                .accessibilityAction { onSelect(index) }
+            }
+        }
+        .animation(.spring(response: 0.24, dampingFraction: 0.86), value: selectedIndex)
+    }
+}
+
+private struct RewriteRow: View {
+    let index: Int
+    let rewrite: Rewrite
+    let isSelected: Bool
+    let selection: Namespace.ID
+    let appearDelay: Double
+    @State private var appeared = false
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            KeyCap(label: String(index + 1), highlighted: isSelected)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(rewrite.style.title.uppercased())
+                    .font(.system(size: 9.5, weight: .semibold))
+                    .tracking(0.6)
+                    .foregroundStyle(isSelected ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.secondary))
+                Text(rewrite.text)
+                    .font(.system(size: 13))
+                    .foregroundStyle(.primary)
+                    .lineLimit(8)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            Image(systemName: "return")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .padding(.top, 3)
+                .opacity(isSelected ? 1 : 0)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 7)
+        .background {
+            if isSelected {
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(Color.accentColor.opacity(0.20))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .strokeBorder(Color.accentColor.opacity(0.35), lineWidth: 0.5)
+                    }
+                    .matchedGeometryEffect(id: "selection", in: selection)
+            }
+        }
+        .contentShape(Rectangle())
+        .opacity(appeared ? 1 : 0)
+        .offset(y: appeared ? 0 : 3)
+        .onAppear {
+            withAnimation(.easeOut(duration: 0.2).delay(appearDelay)) { appeared = true }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(rewrite.style.title): \(rewrite.text)")
+        .accessibilityHint("Press \(index + 1) to replace the text")
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+    }
+}
+
+private struct RewriteLoadingContent: View {
+    let engine: SuggestionEngine
+    private static let widths: [[CGFloat]] = [[300, 210], [250, 120], [290, 180]]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 6) {
+                Image(systemName: engine == .claude ? "sparkles" : engine.displaySymbol)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Color.accentColor)
+                    .symbolEffect(.pulse)
+                Text(loadingTitle)
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                ProgressView()
+                    .controlSize(.small)
+                    .scaleEffect(0.75)
+                    .frame(width: 14, height: 14)
+            }
+            .padding(.horizontal, 8)
+            .padding(.top, 2)
+            .padding(.bottom, 4)
+            VStack(spacing: 1) {
+                ForEach(Self.widths.indices, id: \.self) { index in
+                    placeholder(widths: Self.widths[index])
+                }
+            }
+            .shimmering()
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(loadingTitle)
+    }
+
+    private var loadingTitle: String {
+        switch engine {
+        case .onDevice: "Rewriting on this Mac…"
+        case .claude: "Asking Claude to rewrite…"
+        case .codex: "Asking Codex to rewrite…"
+        }
+    }
+
+    private func placeholder(widths: [CGFloat]) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            RoundedRectangle(cornerRadius: 4.5, style: .continuous)
+                .fill(Color.primary.opacity(0.07))
+                .frame(width: 18, height: 18)
+            VStack(alignment: .leading, spacing: 6) {
+                RoundedRectangle(cornerRadius: 3, style: .continuous)
+                    .fill(Color.primary.opacity(0.07))
+                    .frame(width: 52, height: 7)
+                ForEach(widths.indices, id: \.self) { line in
+                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                        .fill(Color.primary.opacity(0.09))
+                        .frame(width: widths[line], height: 10)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 7)
+    }
+}
+
 private struct MessageContent: View {
     let symbol: String
     let tint: Color
@@ -594,6 +791,7 @@ private struct PanelFooter: View {
     enum Mode: Equatable {
         case list(showsMeaning: Bool)
         case meaning(nativeLanguageName: String?)
+        case rewrite(canReplace: Bool)
     }
 
     let mode: Mode
@@ -603,6 +801,7 @@ private struct PanelFooter: View {
     let onBack: () -> Void
     let onNative: () -> Void
     let onInsert: () -> Void
+    let onRewrite: () -> Void
 
     var body: some View {
         HStack(spacing: 10) {
@@ -640,7 +839,12 @@ private struct PanelFooter: View {
                 if showsMeaning {
                     FooterHint(keys: "→", label: "meaning")
                 }
-                closeHint
+                Button(action: onRewrite) { FooterHint(keys: "⌘E", label: "rewrite") }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Rewrite the text")
+                if !compact {
+                    closeHint
+                }
                 if refresh {
                     Button(action: onRefresh) { FooterHint(keys: "⌘R", label: "refresh") }
                         .buttonStyle(.plain)
@@ -660,6 +864,24 @@ private struct PanelFooter: View {
                     .accessibilityLabel("Insert this word")
                 if !compact {
                     closeHint
+                }
+            case let .rewrite(canReplace):
+                if canReplace {
+                    FooterHint(keys: "↑↓", label: compact ? nil : "navigate")
+                    Button(action: onInsert) { FooterHint(keys: "⏎", label: "replace") }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Replace the text")
+                }
+                Button(action: onBack) { FooterHint(keys: "←", label: "back") }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Back to words")
+                if !compact {
+                    closeHint
+                }
+                if refresh {
+                    Button(action: onRefresh) { FooterHint(keys: "⌘R", label: "refresh") }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Get new rewrites")
                 }
             }
         }

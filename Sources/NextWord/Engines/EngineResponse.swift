@@ -76,6 +76,39 @@ enum EngineResponse {
         )
     }
 
+    static func hasRewriteFields(_ fields: [String: Any]) -> Bool {
+        RewriteStyle.allCases.contains { style in
+            (fields[style.rawValue] as? String).map { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? false
+        }
+    }
+
+    static func makeRewrites(from fields: [String: Any], original: String) -> [Rewrite] {
+        var seen: Set<String> = [original.trimmingCharacters(in: .whitespacesAndNewlines)]
+        var rewrites: [Rewrite] = []
+        for style in RewriteStyle.allCases {
+            guard let raw = fields[style.rawValue] as? String else { continue }
+            let text = cleanRewrite(raw, original: original)
+            guard !text.isEmpty, seen.insert(text).inserted else { continue }
+            rewrites.append(Rewrite(style: style, text: text))
+        }
+        return rewrites
+    }
+
+    static func cleanRewrite(_ raw: String, original: String) -> String {
+        let pairs: [(Character, Character)] = [("\"", "\""), ("“", "”"), ("„", "“"), ("«", "»"), ("'", "'"), ("‘", "’")]
+        let source = original.trimmingCharacters(in: .whitespacesAndNewlines)
+        var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        for marker in ["<<<TEXT", "TEXT>>>"] {
+            text = text.replacingOccurrences(of: marker, with: "")
+        }
+        text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.count >= 2, let (open, close) = pairs.first(where: { text.first == $0.0 && text.last == $0.1 }),
+           !(source.first == open && source.last == close) {
+            text = String(text.dropFirst().dropLast()).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return text
+    }
+
     static func looksLikeAuthFailure(_ text: String, extraMarkers: [String] = []) -> Bool {
         (authFailureMarkers + extraMarkers).contains { containsPhrase($0, in: text) }
     }

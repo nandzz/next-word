@@ -35,6 +35,7 @@ final class HotkeyMonitor {
         static let escape: Int64 = 53
         static let tab: Int64 = 48
         static let r: Int64 = 15
+        static let e: Int64 = 14
         static let left: Int64 = 123
         static let right: Int64 = 124
         static let down: Int64 = 125
@@ -266,8 +267,12 @@ final class HotkeyMonitor {
         let shift = flags.contains(.maskShift)
 
         if flags.contains(.maskCommand) {
-            let others = flags.intersection([.maskControl, .maskAlternate, .maskShift])
-            return keyCode == KeyCode.r && others.isEmpty ? .refresh : nil
+            guard flags.intersection([.maskControl, .maskAlternate, .maskShift]).isEmpty else { return nil }
+            switch keyCode {
+            case KeyCode.r: return .refresh
+            case KeyCode.e: return .rewrite
+            default: return nil
+            }
         }
         if hasCommandModifiers(flags) { return nil }
 

@@ -87,6 +87,40 @@ enum OnDeviceEngine {
         return meaning
     }
 
+    static func rewrites(of target: RewriteTarget, request: SuggestionRequest) async throws -> [Rewrite] {
+        try ensureAvailable()
+        let language = OnDevicePrompt.textLanguage(ofSample: target.trimmedText, request: request)
+        let session = LanguageModelSession(model: .default, instructions: OnDevicePrompt.rewriteInstructions(for: request, language: language))
+        let prompt = OnDevicePrompt.rewritePrompt(for: target, language: language)
+        let schema = try rewriteSchema(language: language, tone: request.tone)
+        let options = GenerationOptions(temperature: 0.4, maximumResponseTokens: min(2400, max(240, target.text.count * 3 / 2 + 120)))
+        let keys = RewriteStyle.allCases.map(\.rawValue)
+
+        let fields: [String: String] = try await perform(timeout: request.timeout) {
+            let content = try await session.respond(to: prompt, schema: schema, includeSchemaInPrompt: true, options: options).content
+            var fields: [String: String] = [:]
+            for key in keys {
+                if let value = try? content.value(String.self, forProperty: key) { fields[key] = value }
+            }
+            return fields
+        }
+        guard EngineResponse.hasRewriteFields(fields) else { throw OnDeviceError.failed("The model returned no rewrite.") }
+        return EngineResponse.makeRewrites(from: fields, original: target.text)
+    }
+
+    private static func rewriteSchema(language: String?, tone: Tone) throws -> GenerationSchema {
+        let text = language ?? "the language of the message"
+        func property(_ style: RewriteStyle, _ description: String) -> DynamicGenerationSchema.Property {
+            DynamicGenerationSchema.Property(name: style.rawValue, description: description, schema: DynamicGenerationSchema(type: String.self))
+        }
+        let properties = [
+            property(.clearer, "The message in \(text) with correct grammar, spelling and punctuation, clear and natural, about the same length"),
+            property(.shorter, "The same message in \(text), shorter and more direct"),
+            property(.reworded, "The same message in \(text) with different wording. \(tone.promptHint)"),
+        ]
+        return try GenerationSchema(root: DynamicGenerationSchema(name: "Rewrites", properties: properties), dependencies: [])
+    }
+
     private static func normalized(_ text: String) -> String {
         text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil).filter { $0.isLetter || $0.isNumber }
     }

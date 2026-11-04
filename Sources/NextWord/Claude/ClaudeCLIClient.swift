@@ -51,6 +51,16 @@ final class ClaudeCLIClient: SuggestionProviding {
         return try Self.parseMeaning(result, word: word, request: request)
     }
 
+    func rewrites(of target: RewriteTarget, in context: TextContext, request: SuggestionRequest) async throws -> [Rewrite] {
+        let result = try await run(
+            system: PromptBuilder.rewriteSystemPrompt(for: request),
+            user: PromptBuilder.rewriteUserPrompt(for: target, context: context),
+            schema: Self.rewriteSchema,
+            request: request
+        )
+        return try Self.parseRewrites(result, original: target.text)
+    }
+
     private func run(system: String, user: String, schema: String, request: SuggestionRequest) async throws -> ProcessResult {
         let customPath = request.claudePath
         guard let executable = await Task.detached(operation: { ClaudeCLILocator.resolve(customPath: customPath) }).value else {
@@ -95,6 +105,13 @@ final class ClaudeCLIClient: SuggestionProviding {
         return "{\"type\":\"object\",\"properties\":{\(props)},\"required\":[\(required)]}"
     }
 
+    static var rewriteSchema: String {
+        let names = RewriteStyle.allCases.map(\.rawValue)
+        let props = names.map { "\"\($0)\":{\"type\":\"string\"}" }.joined(separator: ",")
+        let required = names.map { "\"\($0)\"" }.joined(separator: ",")
+        return "{\"type\":\"object\",\"properties\":{\(props)},\"required\":[\(required)]}"
+    }
+
     static func arguments(system: String, model: String, schema: String = wordsSchema) -> [String] {
         [
             "-p",
@@ -127,6 +144,14 @@ final class ClaudeCLIClient: SuggestionProviding {
             throw ClaudeCLIError.invalidOutput(EngineResponse.snippet((object["result"] as? String) ?? result.stdoutString))
         }
         return meaning
+    }
+
+    static func parseRewrites(_ result: ProcessResult, original: String) throws -> [Rewrite] {
+        let object = try checkedObject(from: result)
+        guard let fields = structuredObject(from: object), EngineResponse.hasRewriteFields(fields) else {
+            throw ClaudeCLIError.invalidOutput(EngineResponse.snippet((object["result"] as? String) ?? result.stdoutString))
+        }
+        return EngineResponse.makeRewrites(from: fields, original: original)
     }
 
     static func checkedObject(from result: ProcessResult) throws -> [String: Any] {

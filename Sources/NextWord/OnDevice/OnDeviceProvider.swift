@@ -36,4 +36,9 @@ final class OnDeviceProvider: SuggestionProviding {
         guard #available(macOS 26.0, *) else { throw OnDeviceError.unavailable(OnDeviceModel.unsupportedSystemMessage) }
         return try await OnDeviceEngine.meaning(of: word, in: context, request: request)
     }
+
+    func rewrites(of target: RewriteTarget, in context: TextContext, request: SuggestionRequest) async throws -> [Rewrite] {
+        guard #available(macOS 26.0, *) else { throw OnDeviceError.unavailable(OnDeviceModel.unsupportedSystemMessage) }
+        return try await OnDeviceEngine.rewrites(of: target, request: request)
+    }
 }

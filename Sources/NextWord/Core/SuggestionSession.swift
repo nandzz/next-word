@@ -11,6 +11,12 @@ enum MeaningPhase: Equatable {
     case failed(String, String)
 }
 
+enum RewritePhase: Equatable {
+    case loading
+    case loaded([Rewrite])
+    case failed(String)
+}
+
 @MainActor
 @Observable
 final class SuggestionSession {
@@ -25,6 +31,31 @@ final class SuggestionSession {
     var meaningLanguage: MeaningLanguage = .original
     var nativeLanguageName: String = ""
     var meaningCache: [String: WordMeaning] = [:]
+    var isRewriting = false
+    var rewrite: RewritePhase?
+    var rewriteTarget: RewriteTarget?
+    var rewriteIndex = 0
+
+    var rewrites: [Rewrite] {
+        if case let .loaded(rewrites)? = rewrite { return rewrites }
+        return []
+    }
+
+    var selectedRewrite: Rewrite? {
+        rewrites.indices.contains(rewriteIndex) ? rewrites[rewriteIndex] : nil
+    }
+
+    func moveRewriteSelection(by delta: Int) {
+        guard !rewrites.isEmpty else { return }
+        rewriteIndex = ((rewriteIndex + delta) % rewrites.count + rewrites.count) % rewrites.count
+    }
+
+    func clearRewrite() {
+        isRewriting = false
+        rewrite = nil
+        rewriteTarget = nil
+        rewriteIndex = 0
+    }
 
     var words: [String] {
         if case let .loaded(words) = phase { return words }
@@ -41,6 +72,7 @@ final class SuggestionSession {
         startedAt = Date()
         meaning = nil
         meaningCache = [:]
+        clearRewrite()
     }
 
     func moveSelection(by delta: Int) {

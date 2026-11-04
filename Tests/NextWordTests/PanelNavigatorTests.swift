@@ -176,6 +176,81 @@ struct PanelNavigatorMeaningModeTests {
     }
 }
 
+private func rewriteState(count: Int = 3, failed: Bool = false) -> PanelState {
+    PanelState(
+        isShowingMeaning: false,
+        meaningLanguage: .original,
+        meaningEnabled: true,
+        meaningStartsInNative: false,
+        hasSelection: true,
+        hasFailed: false,
+        wordCount: 5,
+        isRewriting: true,
+        rewriteCount: count,
+        rewriteFailed: failed
+    )
+}
+
+struct PanelNavigatorRewriteModeTests {
+    @Test func rewriteKeyOpensRewriteFromList() {
+        #expect(PanelNavigator.action(for: .rewrite, in: listState()) == .openRewrite)
+    }
+
+    @Test func rewriteKeyOpensRewriteFromMeaning() {
+        #expect(PanelNavigator.action(for: .rewrite, in: meaningState(language: .native)) == .openRewrite)
+    }
+
+    @Test func rewriteKeyOpensRewriteAfterWordsFailed() {
+        #expect(PanelNavigator.action(for: .rewrite, in: listState(hasSelection: false, hasFailed: true, wordCount: 0)) == .openRewrite)
+    }
+
+    @Test(arguments: [PanelKey.left, .rewrite])
+    func leftAndRewriteKeyClose(key: PanelKey) {
+        #expect(PanelNavigator.action(for: key, in: rewriteState()) == .closeRewrite)
+    }
+
+    @Test func arrowsMoveRewriteSelection() {
+        #expect(PanelNavigator.action(for: .up, in: rewriteState()) == .moveRewriteSelection(-1))
+        #expect(PanelNavigator.action(for: .down, in: rewriteState()) == .moveRewriteSelection(1))
+    }
+
+    @Test(arguments: [PanelKey.up, .down, .right, .select])
+    func keysDoNothingWhileLoading(key: PanelKey) {
+        #expect(PanelNavigator.action(for: key, in: rewriteState(count: 0)) == .none)
+    }
+
+    @Test func rightDoesNothing() {
+        #expect(PanelNavigator.action(for: .right, in: rewriteState()) == .none)
+    }
+
+    @Test func selectAppliesSelectedRewrite() {
+        #expect(PanelNavigator.action(for: .select, in: rewriteState()) == .applySelectedRewrite)
+    }
+
+    @Test func selectRetriesAfterFailure() {
+        #expect(PanelNavigator.action(for: .select, in: rewriteState(count: 0, failed: true)) == .refreshRewrite)
+    }
+
+    @Test func refreshGetsNewRewrites() {
+        #expect(PanelNavigator.action(for: .refresh, in: rewriteState()) == .refreshRewrite)
+    }
+
+    @Test(arguments: [
+        (1, 3, PanelAction.applyRewrite(index: 0)),
+        (3, 3, PanelAction.applyRewrite(index: 2)),
+        (4, 3, PanelAction.none),
+        (0, 3, PanelAction.none),
+        (1, 0, PanelAction.none),
+    ])
+    func numberKeyAppliesOnlyInRange(number: Int, count: Int, expected: PanelAction) {
+        #expect(PanelNavigator.action(for: .number(number), in: rewriteState(count: count)) == expected)
+    }
+
+    @Test func dismissDismisses() {
+        #expect(PanelNavigator.action(for: .dismiss, in: rewriteState()) == .dismiss)
+    }
+}
+
 struct EngineResolverTests {
     struct Case: CustomTestStringConvertible, Sendable {
         let selected: SuggestionEngine

@@ -4,7 +4,6 @@ import CoreGraphics
 
 enum ClipboardContextReader {
     private enum KeyCode {
-        static let c: CGKeyCode = 8
         static let left: CGKeyCode = 123
         static let right: CGKeyCode = 124
     }
@@ -41,10 +40,7 @@ enum ClipboardContextReader {
 
     @MainActor
     static func readTextBeforeCursor() async -> String? {
-        for _ in 0..<60 where modifiersHeld() {
-            if Task.isCancelled { return nil }
-            try? await Task.sleep(for: .milliseconds(25))
-        }
+        await waitForModifierRelease()
         guard !Task.isCancelled else { return nil }
 
         let pasteboard = NSPasteboard.general
@@ -57,7 +53,7 @@ enum ClipboardContextReader {
         var copySent = false
         var copied: String?
         if !Task.isCancelled {
-            press(KeyCode.c, flags: [.maskCommand])
+            press(KeyboardLayout.keyCode(for: "c", fallback: KeyboardLayout.ansiC), flags: [.maskCommand])
             copySent = true
             copied = await waitForCopiedString(on: pasteboard, since: startCount)
         }
@@ -76,6 +72,43 @@ enum ClipboardContextReader {
     }
 
     @MainActor
+    static func copyText(selectingAll: Bool) async -> String? {
+        await waitForModifierRelease()
+        guard !Task.isCancelled else { return nil }
+
+        let pasteboard = NSPasteboard.general
+        let saved = snapshot(of: pasteboard)
+        let startCount = pasteboard.changeCount
+
+        if selectingAll {
+            press(KeyboardLayout.keyCode(for: "a", fallback: KeyboardLayout.ansiA), flags: [.maskCommand])
+            await pause(milliseconds: 60)
+        }
+        press(KeyboardLayout.keyCode(for: "c", fallback: KeyboardLayout.ansiC), flags: [.maskCommand])
+        let copied = await waitForCopiedString(on: pasteboard, since: startCount)
+
+        if selectingAll {
+            press(KeyCode.right, flags: [])
+        }
+        let changed = pasteboard.changeCount != startCount
+        if changed {
+            restore(saved, to: pasteboard)
+        }
+
+        let cancelled = Task.isCancelled
+        DebugLog.write("clipboard copy selectAll=\(selectingAll) copied=\(copied != nil) length=\(copied?.count ?? 0) changed=\(changed) cancelled=\(cancelled)")
+        return cancelled ? nil : copied
+    }
+
+    @MainActor
+    static func waitForModifierRelease() async {
+        for _ in 0..<60 where modifiersHeld() {
+            if Task.isCancelled { return }
+            try? await Task.sleep(for: .milliseconds(25))
+        }
+    }
+
+    @MainActor
     private static func waitForCopiedString(on pasteboard: NSPasteboard, since startCount: Int) async -> String? {
         let deadline = ContinuousClock.now + copyTimeout
         while ContinuousClock.now < deadline {
@@ -88,7 +121,7 @@ enum ClipboardContextReader {
     }
 
     @MainActor
-    private static func pause(milliseconds: Int) async {
+    static func pause(milliseconds: Int) async {
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(milliseconds)) {
                 continuation.resume()
@@ -101,7 +134,7 @@ enum ClipboardContextReader {
     }
 
     @MainActor
-    private static func press(_ key: CGKeyCode, flags: CGEventFlags) {
+    static func press(_ key: CGKeyCode, flags: CGEventFlags) {
         let source = CGEventSource(stateID: .privateState)
         for keyDown in [true, false] {
             guard let event = CGEvent(keyboardEventSource: source, virtualKey: key, keyDown: keyDown) else { continue }
@@ -117,7 +150,7 @@ enum ClipboardContextReader {
         return declared.isEmpty ? kept : declared
     }
 
-    private static func snapshot(of pasteboard: NSPasteboard) -> [[NSPasteboard.PasteboardType: Data]] {
+    static func snapshot(of pasteboard: NSPasteboard) -> [[NSPasteboard.PasteboardType: Data]] {
         (pasteboard.pasteboardItems ?? []).map { item in
             var entry: [NSPasteboard.PasteboardType: Data] = [:]
             for type in typesToSnapshot(item.types) {
@@ -128,7 +161,7 @@ enum ClipboardContextReader {
         }
     }
 
-    private static func restore(_ items: [[NSPasteboard.PasteboardType: Data]], to pasteboard: NSPasteboard) {
+    static func restore(_ items: [[NSPasteboard.PasteboardType: Data]], to pasteboard: NSPasteboard) {
         pasteboard.clearContents()
         let restored = items.filter { !$0.isEmpty }.map { entry -> NSPasteboardItem in
             let item = NSPasteboardItem()

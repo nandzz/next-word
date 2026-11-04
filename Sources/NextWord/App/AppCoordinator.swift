@@ -16,6 +16,7 @@ final class AppCoordinator {
     private let onDevice = OnDeviceProvider()
     private let codex = CodexCLIClient()
     private var meaningTask: Task<Void, Never>?
+    private var rewriteTask: Task<Void, Never>?
     private lazy var panel = SuggestionPanelController(session: session, settings: settings)
     private var requestTask: Task<Void, Never>?
     private var contextTask: Task<Void, Never>?
@@ -79,9 +80,11 @@ final class AppCoordinator {
     private func wirePanel() {
         panel.onSelect = { [weak self] word in self?.insert(word) }
         panel.onDismiss = { [weak self] in self?.dismiss() }
-        panel.onRefresh = { [weak self] in self?.fetchSuggestions() }
+        panel.onRefresh = { [weak self] in self?.handle(.refresh) }
         panel.onOpenMeaning = { [weak self] in self?.handle(.right) }
         panel.onMeaningBack = { [weak self] in self?.handle(.left) }
+        panel.onToggleRewrite = { [weak self] in self?.handle(.rewrite) }
+        panel.onSelectRewrite = { [weak self] index in self?.handle(.number(index + 1)) }
     }
 
     private func wireHotkey() {
@@ -346,6 +349,115 @@ final class AppCoordinator {
         session.meaning = nil
     }
 
+    private func openRewrite() {
+        hideMeaning()
+        session.isRewriting = true
+        switch session.rewrite {
+        case .loaded?, .loading?:
+            return
+        case .failed?, nil:
+            fetchRewrites()
+        }
+    }
+
+    private func closeRewrite() {
+        if case .loading? = session.rewrite {
+            rewriteTask?.cancel()
+            rewriteTask = nil
+            session.rewrite = nil
+        }
+        session.isRewriting = false
+    }
+
+    private func fetchRewrites() {
+        rewriteTask?.cancel()
+        session.isRewriting = true
+        session.rewriteIndex = 0
+        let resolution = resolution
+        if let unavailable = resolution.unavailableMessage {
+            session.rewrite = .failed(unavailable)
+            return
+        }
+        session.rewrite = .loading
+        let engine = resolution.engine
+        let provider = provider(for: engine)
+        let request = settings.makeRequest()
+        let pendingContext = contextTask
+        rewriteTask = Task { [session, status] in
+            await pendingContext?.value
+            guard !Task.isCancelled else { return }
+            let target: RewriteTarget
+            if let existing = session.rewriteTarget {
+                target = existing
+            } else {
+                let plan = await readRewriteTarget()
+                guard !Task.isCancelled else { return }
+                guard case let .ready(found) = plan else {
+                    if case let .unavailable(message) = plan {
+                        session.rewrite = .failed(message)
+                    } else {
+                        session.rewrite = .failed(RewritePlanner.unreadableMessage)
+                    }
+                    return
+                }
+                target = found
+            }
+            guard !Task.isCancelled else { return }
+            session.rewriteTarget = target
+            let context = session.context ?? TextContext(
+                appName: NSWorkspace.shared.frontmostApplication?.localizedName ?? "Unknown",
+                bundleID: nil,
+                windowTitle: nil,
+                textBeforeCursor: "",
+                textAfterCursor: "",
+                caretRect: nil
+            )
+            let started = Date()
+            do {
+                let rewrites = try await provider.rewrites(of: target, in: context, request: request)
+                guard !Task.isCancelled else { return }
+                status.lastLatency = Date().timeIntervalSince(started)
+                DebugLog.write("rewrites engine=\(engine.rawValue) scope=\(target.scope.rawValue) count=\(rewrites.count) latency=\(String(format: "%.2f", Date().timeIntervalSince(started)))")
+                session.rewrite = rewrites.isEmpty ? .failed(RewritePlanner.noChangesMessage) : .loaded(rewrites)
+                if let first = rewrites.first {
+                    NSAccessibility.post(
+                        element: NSApp as Any,
+                        notification: .announcementRequested,
+                        userInfo: [.announcement: "\(rewrites.count) rewrites. First: \(first.text)", .priority: NSAccessibilityPriorityLevel.high.rawValue]
+                    )
+                }
+            } catch is CancellationError {
+            } catch {
+                guard !Task.isCancelled else { return }
+                DebugLog.write("rewrites engine=\(engine.rawValue) error=\(error.localizedDescription)")
+                session.rewrite = .failed(error.localizedDescription)
+            }
+        }
+    }
+
+    private func readRewriteTarget() async -> RewritePlan {
+        let limit = RewritePlanner.maxLength * 2
+        let field = await Task.detached { FocusedTextReader.readField(maxLength: limit) }.value
+        let bundleID = field?.bundleID ?? session.context?.bundleID ?? NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        let canCopy = field?.isSecure != true && ClipboardContextReader.canUseFallback(for: nil, bundleID: bundleID)
+        let plan = RewritePlanner.plan(for: field, bundleID: bundleID, canCopy: canCopy)
+        guard case let .copy(scope) = plan else { return plan }
+        guard !Task.isCancelled, hotkey.isPanelActive else { return .unavailable(RewritePlanner.unreadableMessage) }
+        guard let copied = await ClipboardContextReader.copyText(selectingAll: scope == .field) else {
+            return .unavailable(RewritePlanner.unreadableMessage)
+        }
+        return RewritePlanner.target(scope, copied)
+    }
+
+    private func applyRewrite(_ rewrite: Rewrite) {
+        guard let target = session.rewriteTarget else { return }
+        dismiss()
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(50))
+            await TextReplacer.replace(target, with: rewrite.text)
+        }
+    }
+
     private func handle(_ key: PanelKey) {
         let state = PanelState(
             isShowingMeaning: session.isShowingMeaning,
@@ -354,7 +466,10 @@ final class AppCoordinator {
             meaningStartsInNative: settings.meaningStartsInNative,
             hasSelection: session.selectedWord != nil,
             hasFailed: { if case .failed = session.phase { return true } else { return false } }(),
-            wordCount: session.words.count
+            wordCount: session.words.count,
+            isRewriting: session.isRewriting,
+            rewriteCount: session.rewrites.count,
+            rewriteFailed: { if case .failed? = session.rewrite { return true } else { return false } }()
         )
         switch PanelNavigator.action(for: key, in: state) {
         case let .moveSelection(delta):
@@ -375,6 +490,18 @@ final class AppCoordinator {
         case .refreshMeaning:
             if let word = session.selectedWord { session.meaningCache[word] = nil }
             showMeaning()
+        case .openRewrite:
+            openRewrite()
+        case .closeRewrite:
+            closeRewrite()
+        case let .moveRewriteSelection(delta):
+            session.moveRewriteSelection(by: delta)
+        case .applySelectedRewrite:
+            if let rewrite = session.selectedRewrite { applyRewrite(rewrite) }
+        case let .applyRewrite(index):
+            applyRewrite(session.rewrites[index])
+        case .refreshRewrite:
+            fetchRewrites()
         case .dismiss:
             dismiss()
         case .none:
@@ -395,10 +522,13 @@ final class AppCoordinator {
         contextTask = nil
         requestTask?.cancel()
         requestTask = nil
+        rewriteTask?.cancel()
+        rewriteTask = nil
         hideMeaning()
         hotkey.isPanelActive = false
         panel.hide()
         session.phase = .idle
+        session.clearRewrite()
     }
     private func openSettings() {
         if settingsWindow == nil {

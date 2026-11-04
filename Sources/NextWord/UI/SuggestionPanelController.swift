@@ -8,6 +8,8 @@ final class SuggestionPanelController {
     var onRefresh: (() -> Void)?
     var onOpenMeaning: (() -> Void)?
     var onMeaningBack: (() -> Void)?
+    var onToggleRewrite: (() -> Void)?
+    var onSelectRewrite: ((Int) -> Void)?
 
     var isVisible: Bool { isShown }
 
@@ -100,7 +102,9 @@ final class SuggestionPanelController {
                 Task { @MainActor in self?.contentSizeDidChange(size) }
             },
             onOpenMeaning: onOpenMeaning.map { _ in { [weak self] in self?.onOpenMeaning?() } },
-            onMeaningBack: onMeaningBack.map { _ in { [weak self] in self?.onMeaningBack?() } }
+            onMeaningBack: onMeaningBack.map { _ in { [weak self] in self?.onMeaningBack?() } },
+            onToggleRewrite: { [weak self] in self?.onToggleRewrite?() },
+            onSelectRewrite: { [weak self] index in self?.onSelectRewrite?(index) }
         )
     }
 

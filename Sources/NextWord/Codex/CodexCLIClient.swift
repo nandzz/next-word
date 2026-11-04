@@ -54,6 +54,19 @@ final class CodexCLIClient: SuggestionProviding {
         return meaning
     }
 
+    func rewrites(of target: RewriteTarget, in context: TextContext, request: SuggestionRequest) async throws -> [Rewrite] {
+        let prompt = [
+            PromptBuilder.rewriteSystemPrompt(for: request),
+            PromptBuilder.rewriteUserPrompt(for: target, context: context),
+            #"Reply with only this JSON object and nothing else: {"clearer": "...", "shorter": "...", "reworded": "..."}"#,
+        ].joined(separator: "\n\n")
+        let object = try await run(prompt: prompt, request: request)
+        guard EngineResponse.hasRewriteFields(object) else {
+            throw CodexCLIError.invalidOutput("The answer has no rewrite.")
+        }
+        return EngineResponse.makeRewrites(from: object, original: target.text)
+    }
+
     static func arguments(workingDirectory: URL, outputFile: URL, model: String?) -> [String] {
         var arguments = [
             "exec",

@@ -26,6 +26,7 @@ enum PanelKey: Equatable {
     case select
     case dismiss
     case refresh
+    case rewrite
     case number(Int)
 }
 
@@ -128,4 +129,5 @@ struct SuggestionRequest: Sendable {
 protocol SuggestionProviding: Sendable {
     func suggestions(for context: TextContext, request: SuggestionRequest) async throws -> [String]
     func meaning(of word: String, in context: TextContext, request: SuggestionRequest) async throws -> WordMeaning
+    func rewrites(of target: RewriteTarget, in context: TextContext, request: SuggestionRequest) async throws -> [Rewrite]
 }

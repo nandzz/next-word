@@ -42,6 +42,12 @@ enum PanelAction: Equatable {
     case retrySuggestions
     case refreshSuggestions
     case refreshMeaning
+    case openRewrite
+    case closeRewrite
+    case moveRewriteSelection(Int)
+    case applySelectedRewrite
+    case applyRewrite(index: Int)
+    case refreshRewrite
     case dismiss
     case none
 }
@@ -54,10 +60,14 @@ struct PanelState: Equatable {
     var hasSelection: Bool
     var hasFailed: Bool
     var wordCount: Int
+    var isRewriting = false
+    var rewriteCount = 0
+    var rewriteFailed = false
 }
 
 enum PanelNavigator {
     static func action(for key: PanelKey, in state: PanelState) -> PanelAction {
+        if state.isRewriting { return rewriteAction(for: key, in: state) }
         switch key {
         case .up:
             return state.wordCount > 0 ? .moveSelection(-1) : .none
@@ -82,6 +92,30 @@ enum PanelNavigator {
             return n >= 1 && n <= state.wordCount ? .insert(index: n - 1) : .none
         case .refresh:
             return state.isShowingMeaning ? .refreshMeaning : .refreshSuggestions
+        case .rewrite:
+            return .openRewrite
+        case .dismiss:
+            return .dismiss
+        }
+    }
+
+    private static func rewriteAction(for key: PanelKey, in state: PanelState) -> PanelAction {
+        switch key {
+        case .up:
+            return state.rewriteCount > 0 ? .moveRewriteSelection(-1) : .none
+        case .down:
+            return state.rewriteCount > 0 ? .moveRewriteSelection(1) : .none
+        case .left, .rewrite:
+            return .closeRewrite
+        case .right:
+            return .none
+        case .select:
+            if state.rewriteCount > 0 { return .applySelectedRewrite }
+            return state.rewriteFailed ? .refreshRewrite : .none
+        case let .number(n):
+            return n >= 1 && n <= state.rewriteCount ? .applyRewrite(index: n - 1) : .none
+        case .refresh:
+            return .refreshRewrite
         case .dismiss:
             return .dismiss
         }

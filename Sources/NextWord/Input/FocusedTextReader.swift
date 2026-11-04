@@ -95,6 +95,45 @@ enum FocusedTextReader {
         )
     }
 
+    nonisolated static func readField(maxLength: Int) -> FieldSnapshot? {
+        let systemWide = AXUIElementCreateSystemWide()
+        AXUIElementSetMessagingTimeout(systemWide, messagingTimeout)
+        guard let (appElement, pid) = focusedApplication(systemWide: systemWide) else { return nil }
+        AXUIElementSetMessagingTimeout(appElement, messagingTimeout)
+        guard let focused = element(appElement, kAXFocusedUIElementAttribute) ?? element(systemWide, kAXFocusedUIElementAttribute) else {
+            return nil
+        }
+        AXUIElementSetMessagingTimeout(focused, messagingTimeout)
+
+        let bundleID = NSRunningApplication(processIdentifier: pid)?.bundleIdentifier
+        let role = string(focused, kAXRoleAttribute)
+        let subrole = string(focused, kAXSubroleAttribute)
+        let selection = range(focused, kAXSelectedTextRangeAttribute)
+        var snapshot = FieldSnapshot(
+            bundleID: bundleID,
+            isTextElement: role.map(textRoles.contains) == true || selection != nil,
+            isSecure: role == secureRole || subrole == secureRole,
+            selectionLength: max(selection?.length ?? 0, 0)
+        )
+        guard !snapshot.isSecure else { return snapshot }
+
+        if snapshot.selectionLength > 0, let selected = string(focused, kAXSelectedTextAttribute), !selected.isEmpty {
+            snapshot.selectedText = selected
+        }
+        let count = integer(focused, kAXNumberOfCharactersAttribute)
+        snapshot.fieldLength = count
+        if let count, count >= 0, count <= maxLength {
+            snapshot.fieldText = count == 0 ? "" : string(focused, for: CFRange(location: 0, length: count))
+        }
+        if snapshot.fieldText == nil, (count ?? 0) <= maxLength, let value = string(focused, kAXValueAttribute),
+           (value as NSString).length <= maxLength {
+            snapshot.fieldText = value
+            snapshot.fieldLength = (value as NSString).length
+        }
+        DebugLog.write("ax field: \(bundleID ?? "?") role=\(role ?? "?") selection=\(snapshot.selectionLength) selected=\(snapshot.selectedText?.count ?? -1) field=\(snapshot.fieldText?.count ?? -1) length=\(snapshot.fieldLength ?? -1)")
+        return snapshot
+    }
+
     nonisolated static func prepare(_ app: NSRunningApplication) {
         let pid = app.processIdentifier
         let bundleID = app.bundleIdentifier
